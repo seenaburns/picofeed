@@ -207,7 +207,7 @@ func fetchAll(ctx context.Context, feeds []*url.URL) []*Post {
 
 			feedData, err := fetchFeed(ctxTimeout, feed)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "ERROR: %v\n", feed, err)
+				fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 				return
 			}
 
@@ -288,7 +288,7 @@ func parseFeedArg(feed string) ([]*url.URL, error) {
 		// feed is not a file, treat as url
 		u, err := url.Parse(feed)
 		if err != nil {
-			return nil, errors.Wrapf(err, "%q is not a file, url.Parse(%q) failed")
+			return nil, errors.Wrapf(err, "%q is not a file, url.Parse() failed", feed)
 		}
 		return []*url.URL{u}, nil
 	}
