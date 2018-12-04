@@ -88,6 +88,7 @@ func renderWeb(postsByTime map[string]*Post, keys []string) {
 <style>
 body {
 	margin: 0 auto;
+	padding: 2em 0px;
 	max-width: 800px;
 	color: #888;
 	font-family: -apple-system,system-ui,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
@@ -100,6 +101,7 @@ a:visited {color: #888;}
 </style>
 </head>
 <body>
+<h4 style="padding-bottom: 2em">Picofeed</h4>
 `)
 
 	lastDate := ""
