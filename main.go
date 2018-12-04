@@ -19,7 +19,7 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
-const VERSION = "1.0"
+const VERSION = "1.1"
 const FETCH_TIMEOUT = 10 * time.Second
 
 var (
