@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
+	"net/http"
 	"net/url"
 	"os"
 	"sort"
@@ -16,11 +18,16 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
+const VERSION = "1.0"
+const FETCH_TIMEOUT = 10 * time.Second
+
 var (
 	web = flag.Bool("web", false, "Display in browser")
 )
 
 func main() {
+	ctx := context.Background()
+
 	flag.Parse()
 
 	feedsList := flag.Args()
@@ -40,7 +47,7 @@ func main() {
 		feeds = append(feeds, newFeeds...)
 	}
 
-	posts := fetchAll(feeds)
+	posts := fetchAll(ctx, feeds)
 	if *web {
 		renderWeb(posts, "Jan 2006")
 	} else {
@@ -164,18 +171,28 @@ func groupByDate(posts []*Post, dateFormat string) [][]*Post {
 }
 
 // Fetch list of feeds in parallel, aggregate results
-func fetchAll(feeds []*url.URL) []*Post {
+func fetchAll(ctx context.Context, feeds []*url.URL) []*Post {
+	ctxTimeout, timeoutCancel := context.WithTimeout(ctx, FETCH_TIMEOUT)
+	defer timeoutCancel()
+
 	var wg sync.WaitGroup
 	postChan := make(chan *Post, 10000)
 	for _, f := range feeds {
 		wg.Add(1)
 		go func(feed *url.URL) {
 			defer wg.Done()
-			posts, err := fetchFeed(feed)
+
+			feedData, err := fetchFeed(ctxTimeout, feed)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "ERROR: %v", err)
+				fmt.Fprintf(os.Stderr, "ERROR: %v\n", feed, err)
 				return
 			}
+
+			posts, err := parseFeed(feed, feedData)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "ERROR: failed reading feed data %q: %v\n", feed, err)
+			}
+
 			for _, p := range posts {
 				postChan <- p
 			}
@@ -192,13 +209,28 @@ func fetchAll(feeds []*url.URL) []*Post {
 }
 
 // Fetch a single feed into a list of posts
-func fetchFeed(feedUrl *url.URL) ([]*Post, error) {
-	fp := gofeed.NewParser()
-	feed, err := fp.ParseURL(feedUrl.String())
+func fetchFeed(ctx context.Context, feedUrl *url.URL) (*gofeed.Feed, error) {
+	feedParser := gofeed.NewParser()
+
+	client := &http.Client{}
+	req, _ := http.NewRequest("GET", feedUrl.String(), nil)
+	req.Header.Set("User-Agent", fmt.Sprintf("picofeed/%s", VERSION))
+	req = req.WithContext(ctx)
+
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, errors.Wrapf(err, "gofeed.ParseURL(%q)", feedUrl.String())
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("%d: %s", resp.StatusCode, resp.Status)
 	}
 
+	return feedParser.Parse(resp.Body)
+}
+
+func parseFeed(feedUrl *url.URL, feed *gofeed.Feed) ([]*Post, error) {
 	posts := []*Post{}
 	for _, i := range feed.Items {
 		t := i.PublishedParsed
@@ -206,7 +238,7 @@ func fetchFeed(feedUrl *url.URL) ([]*Post, error) {
 			if i.UpdatedParsed != nil {
 				t = i.UpdatedParsed
 			} else {
-				fmt.Fprintf(os.Stderr, "Invalid time (%q, %q): %v", feedUrl, i.Title, i.PublishedParsed)
+				fmt.Fprintf(os.Stderr, "Invalid time (%q): %v", i.Title, i.PublishedParsed)
 				continue
 			}
 		}
