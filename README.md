@@ -18,7 +18,7 @@ Examples:
     picofeed http://seenaburns.com/feed.xml feeds.txt http://example.com/feed.xml
 ```
 
-```
+```sh
 # Use whatever click to open your terminal supports, like cmd+double click in OSX's Terminal.app
 ./picofeed feeds.txt
 ```
@@ -27,7 +27,7 @@ Examples:
       <img alt="picofeed terminal rss" src="https://user-images.githubusercontent.com/2801344/49423749-45c6d080-f74d-11e8-8b61-18fc589bb857.png"/>
 </p>
 
-```
+```sh
 # Open in browser with clickable links (wow!)
 ./picofeed feeds.txt --web
 ```
