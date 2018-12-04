@@ -25,6 +25,24 @@ var (
 	web = flag.Bool("web", false, "Display in browser")
 )
 
+func init() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, `Usage:
+  picofeed takes feed urls or files of newline separated urls
+
+  Examples:
+	picofeed feeds.txt --web
+	picofeed http://seenaburns.com/feed.xml
+	picofeed http://seenaburns.com/feed.xml feeds.txt http://example.com/feed.xml
+
+  Flags:
+`)
+		flag.PrintDefaults()
+	}
+
+	flag.ErrHelp = errors.New("")
+}
+
 func main() {
 	ctx := context.Background()
 
@@ -32,9 +50,14 @@ func main() {
 
 	feedsList := flag.Args()
 	if len(feedsList) == 0 {
-		fmt.Fprintf(os.Stderr, "No feed provied\n")
-		fmt.Fprintf(os.Stderr, "Try `./picofeed feeds.txt` or `./picofeed http://seenaburns.com/feed.xml http://example.com/feed.xml`\n")
+		fmt.Fprintf(os.Stderr, "ERROR: No feed provided\n\n")
+		flag.Usage()
 		os.Exit(1)
+	}
+
+	if feedsList[0] == "version" {
+		fmt.Fprintf(os.Stderr, "%s\n", VERSION)
+		return
 	}
 
 	feeds := []*url.URL{}
