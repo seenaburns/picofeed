@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/url"
 	"os"
 	"sort"
@@ -42,48 +40,41 @@ func main() {
 		feeds = append(feeds, newFeeds...)
 	}
 
-	posts := fetchFeeds(feeds)
-
-	keys := []string{}
-	for k := range posts {
-		keys = append(keys, k)
-	}
-	sort.Sort(sort.Reverse(sort.StringSlice(keys)))
-
+	posts := fetchAll(feeds)
 	if *web {
-		renderWeb(posts, keys)
+		renderWeb(posts, "Jan 2006")
 	} else {
-		render(posts, keys)
+		render(posts, "Jan 2006")
 	}
 }
 
-func render(postsByTime map[string]*Post, keys []string) {
-	lastDate := ""
-	for _, k := range keys {
-		p := postsByTime[k]
+func render(posts []*Post, dateFormat string) {
+	grouped := groupByDate(posts, dateFormat)
 
-		date := p.Timestamp.Format("Jan 2006")
-		if date != lastDate {
-			fmt.Printf("%s\n", date)
-			lastDate = date
+	for _, group := range grouped {
+		for i, p := range group {
+			if i == 0 {
+				fmt.Printf("%s\n", p.Timestamp.Format(dateFormat))
+			}
+			if len(p.Title) > 70 {
+				fmt.Printf("    %v\n", p.Title)
+				fmt.Printf("    %70v %s\n", "", p.Link)
+			} else {
+				fmt.Printf("    %-70v %s\n", p.Title, p.Link)
+			}
 		}
-
-		printPost(p)
 	}
 }
 
-func printPost(p *Post) {
-	if len(p.Title) > 70 {
-		fmt.Printf("    %v\n", p.Title)
-		fmt.Printf("    %70v %s\n", "", p.Link)
-	} else {
-		fmt.Printf("    %-70v %s\n", p.Title, p.Link)
+func renderWeb(posts []*Post, dateFormat string) {
+	f, err := ioutil.TempFile("", "picoweb.*.html")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to make temp file: %v", err)
+		os.Exit(1)
 	}
-}
+	defer f.Close()
 
-func renderWeb(postsByTime map[string]*Post, keys []string) {
-	buf := bytes.NewBuffer(nil)
-	fmt.Fprintf(buf, `<!DOCTYPE html>
+	fmt.Fprintf(f, `<!DOCTYPE html>
 <head>
 <style>
 body {
@@ -104,26 +95,21 @@ a:visited {color: #888;}
 <h4 style="padding-bottom: 2em">Picofeed</h4>
 `)
 
-	lastDate := ""
-	for _, k := range keys {
-		p := postsByTime[k]
+	grouped := groupByDate(posts, dateFormat)
 
-		date := p.Timestamp.Format("Jan 2006")
-		if date != lastDate {
-			fmt.Fprintf(buf, "<h4>%s</h4>\n", date)
-			lastDate = date
+	for _, group := range grouped {
+		for i, p := range group {
+			if i == 0 {
+				fmt.Fprintf(f, "<h4>%s</h4>\n", p.Timestamp.Format(dateFormat))
+			}
+			fmt.Fprintf(f, "<div><a href=\"%s\">%s</a> (%s)</div>", p.Link, p.Title, p.shortFeedLink())
 		}
-
-		fmt.Fprintf(buf, "<div><a href=\"%s\">%s</a> (%s)</div>", p.Link, p.Title, p.shortFeedLink())
 	}
 
-	fmt.Fprintf(buf, `</body>
+	fmt.Fprintf(f, `</body>
 </html>`)
 
-	err := browser.OpenReader(buf)
-	if err != nil {
-		log.Fatal(errors.Wrapf(err, "browser.OpenReader"))
-	}
+	_ = browser.OpenFile(f.Name())
 }
 
 type Post struct {
@@ -143,9 +129,42 @@ func (p *Post) shortFeedLink() string {
 	return u.Host
 }
 
-func fetchFeeds(feeds []*url.URL) map[string]*Post {
-	postsByTime := make(map[string]*Post)
+type Posts []*Post
 
+func (posts Posts) Len() int      { return len(posts) }
+func (posts Posts) Swap(i, j int) { posts[i], posts[j] = posts[j], posts[i] }
+
+type ByTimestamp struct{ Posts }
+
+func (posts ByTimestamp) Less(i, j int) bool {
+	return posts.Posts[i].Timestamp.After(*posts.Posts[j].Timestamp)
+}
+
+// Return list of lists of posts, where each given list has the same date
+// E.g. [Dec 2018 -> []*Post, Nov 2018 -> []*Post, ...]
+// Mutates posts (sorts) before running
+func groupByDate(posts []*Post, dateFormat string) [][]*Post {
+	sort.Sort(ByTimestamp{posts})
+
+	// Initialize with 1 list
+	grouped := [][]*Post{[]*Post{}}
+
+	lastDate := ""
+	for _, p := range posts {
+		date := p.Timestamp.Format(dateFormat)
+		if date != lastDate {
+			// New date, make new list
+			grouped = append(grouped, []*Post{})
+			lastDate = date
+		}
+		current := len(grouped) - 1
+		grouped[current] = append(grouped[current], p)
+	}
+	return grouped
+}
+
+// Fetch list of feeds in parallel, aggregate results
+func fetchAll(feeds []*url.URL) []*Post {
 	var wg sync.WaitGroup
 	postChan := make(chan *Post, 10000)
 	for _, f := range feeds {
@@ -154,7 +173,7 @@ func fetchFeeds(feeds []*url.URL) map[string]*Post {
 			defer wg.Done()
 			posts, err := fetchFeed(feed)
 			if err != nil {
-				log.Printf("ERROR: %v", err)
+				fmt.Fprintf(os.Stderr, "ERROR: %v", err)
 				return
 			}
 			for _, p := range posts {
@@ -165,12 +184,14 @@ func fetchFeeds(feeds []*url.URL) map[string]*Post {
 	wg.Wait()
 	close(postChan)
 
+	posts := []*Post{}
 	for p := range postChan {
-		postsByTime[fmt.Sprintf("%d-%s", p.Timestamp.Unix(), p.Link)] = p
+		posts = append(posts, p)
 	}
-	return postsByTime
+	return posts
 }
 
+// Fetch a single feed into a list of posts
 func fetchFeed(feedUrl *url.URL) ([]*Post, error) {
 	fp := gofeed.NewParser()
 	feed, err := fp.ParseURL(feedUrl.String())
@@ -185,7 +206,7 @@ func fetchFeed(feedUrl *url.URL) ([]*Post, error) {
 			if i.UpdatedParsed != nil {
 				t = i.UpdatedParsed
 			} else {
-				log.Printf("Invalid time: %v", i.PublishedParsed)
+				fmt.Fprintf(os.Stderr, "Invalid time (%q, %q): %v", feedUrl, i.Title, i.PublishedParsed)
 				continue
 			}
 		}
@@ -197,7 +218,6 @@ func fetchFeed(feedUrl *url.URL) ([]*Post, error) {
 			FeedTitle: feed.Title,
 			FeedLink:  feedUrl.String(),
 		})
-
 	}
 
 	fmt.Fprintf(os.Stderr, "Fetched %q: %d posts\n", feedUrl, len(feed.Items))
