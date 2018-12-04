@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -205,7 +206,7 @@ func fetchAll(ctx context.Context, feeds []*url.URL) []*Post {
 		go func(feed *url.URL) {
 			defer wg.Done()
 
-			feedData, err := fetchFeed(ctxTimeout, feed)
+			feedData, err := fetchFeed(ctxTimeout, feed, 0)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 				return
@@ -232,7 +233,7 @@ func fetchAll(ctx context.Context, feeds []*url.URL) []*Post {
 }
 
 // Fetch a single feed into a list of posts
-func fetchFeed(ctx context.Context, feedUrl *url.URL) (*gofeed.Feed, error) {
+func fetchFeed(ctx context.Context, feedUrl *url.URL, depth int) (*gofeed.Feed, error) {
 	feedParser := gofeed.NewParser()
 
 	client := &http.Client{}
@@ -250,7 +251,53 @@ func fetchFeed(ctx context.Context, feedUrl *url.URL) (*gofeed.Feed, error) {
 		return nil, fmt.Errorf("%d: %s", resp.StatusCode, resp.Status)
 	}
 
-	return feedParser.Parse(resp.Body)
+	contents, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Failed reading response body")
+	}
+
+	feed, err := feedParser.ParseString(string(contents))
+	if err == gofeed.ErrFeedTypeNotDetected && depth == 0 {
+		// User possibly tried to pass in a non-feed page, try to look for link to feed in header
+		// If found, recurse
+		newFeed := extractFeedLink(feedUrl, string(contents))
+		if newFeed == nil {
+			return nil, errors.New("Feed type not recognized, could not extract feed from <head>")
+		}
+		fmt.Fprintf(os.Stderr, "Autodiscovering feed %q for %q\n", newFeed, feedUrl)
+		return fetchFeed(ctx, newFeed, 1)
+	}
+
+	return feed, err
+}
+
+func extractFeedLink(baseUrl *url.URL, contents string) *url.URL {
+	regexes := []string{
+		`\s*<link.*type="application/rss\+xml.*href="([^"]*)"`,
+		`\s*<link.*type="application/atom\+xml.*href="([^"]*)"`,
+	}
+
+	for _, r := range regexes {
+		re := regexp.MustCompile(r)
+		matches := re.FindStringSubmatch(contents)
+		if len(matches) > 1 {
+			if strings.HasPrefix(matches[1], "/") {
+				// relative path
+				newUrl := *baseUrl
+				newUrl.Path = matches[1]
+				return &newUrl
+			}
+
+			u, err := url.Parse(matches[1])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Autodetected %q for %q but could not parse url", matches[1], baseUrl)
+				continue
+			}
+			return u
+		}
+	}
+
+	return nil
 }
 
 func parseFeed(feedUrl *url.URL, feed *gofeed.Feed) ([]*Post, error) {
