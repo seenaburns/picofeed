@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -16,19 +15,31 @@ import (
 	"github.com/mmcdole/gofeed"
 	"github.com/pkg/browser"
 	"github.com/pkg/errors"
+	flag "github.com/spf13/pflag"
 )
 
 var (
-	feedsPath = flag.String("feeds", "feeds.txt", "File with newline separated urls")
-	web       = flag.Bool("web", false, "Display in browser")
+	web = flag.Bool("web", false, "Display in browser")
 )
 
 func main() {
 	flag.Parse()
 
-	feeds, err := readFeedsFile(*feedsPath)
-	if err != nil {
-		log.Fatal(err)
+	feedsList := flag.Args()
+	if len(feedsList) == 0 {
+		fmt.Fprintf(os.Stderr, "No feed provied\n")
+		fmt.Fprintf(os.Stderr, "Try `./picofeed feeds.txt` or `./picofeed http://seenaburns.com/feed.xml http://example.com/feed.xml`\n")
+		os.Exit(1)
+	}
+
+	feeds := []*url.URL{}
+	for _, f := range feedsList {
+		newFeeds, err := parseFeedArg(f)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Couldn't parse %q as a url or a file of newline separated urls: %v\n", f, err)
+			os.Exit(1)
+		}
+		feeds = append(feeds, newFeeds...)
 	}
 
 	posts := fetchFeeds(feeds)
@@ -192,12 +203,24 @@ func fetchFeed(feedUrl *url.URL) ([]*Post, error) {
 	return posts, nil
 }
 
-func readFeedsFile(path string) ([]*url.URL, error) {
-	contents, err := ioutil.ReadFile(path)
-	if err != nil {
-		return nil, errors.Wrapf(err, "ReadFile(%q)", path)
+// If feed is a path to a file, attempt to read it as a newline separated list of urls
+// Otherwise try parsing as a url itself
+func parseFeedArg(feed string) ([]*url.URL, error) {
+	f, err := os.Stat(feed)
+	if os.IsNotExist(err) || (err == nil && !f.Mode().IsRegular()) {
+		// feed is not a file, treat as url
+		u, err := url.Parse(feed)
+		if err != nil {
+			return nil, errors.Wrapf(err, "%q is not a file, url.Parse(%q) failed")
+		}
+		return []*url.URL{u}, nil
 	}
 
+	// feed is a file, read as newline separated urls
+	contents, err := ioutil.ReadFile(feed)
+	if err != nil {
+		return nil, errors.Wrapf(err, "ReadFile(%q)", feed)
+	}
 	lines := strings.Split(string(contents), "\n")
 
 	urls := []*url.URL{}
