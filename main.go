@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -23,7 +24,8 @@ const VERSION = "1.1"
 const FETCH_TIMEOUT = 10 * time.Second
 
 var (
-	web = flag.Bool("web", false, "Display in browser")
+	html = flag.Bool("html", false, "Render feed as html to stdout")
+	web  = flag.Bool("web", false, "Display feed in browser")
 )
 
 func init() {
@@ -73,7 +75,18 @@ func main() {
 
 	posts := fetchAll(ctx, feeds)
 	if *web {
-		renderWeb(posts, "Jan 2006")
+		f, err := ioutil.TempFile("", "picoweb.*.html")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to make temp file: %v", err)
+			os.Exit(1)
+		}
+		defer f.Close()
+
+		renderHtml(f, posts, "Jan 2006")
+
+		_ = browser.OpenFile(f.Name())
+	} else if *html {
+		renderHtml(os.Stdout, posts, "Jan 2006")
 	} else {
 		render(posts, "Jan 2006")
 	}
@@ -97,14 +110,7 @@ func render(posts []*Post, dateFormat string) {
 	}
 }
 
-func renderWeb(posts []*Post, dateFormat string) {
-	f, err := ioutil.TempFile("", "picoweb.*.html")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to make temp file: %v", err)
-		os.Exit(1)
-	}
-	defer f.Close()
-
+func renderHtml(f io.Writer, posts []*Post, dateFormat string) {
 	fmt.Fprintf(f, `<!DOCTYPE html>
 <head>
 <style>
@@ -133,14 +139,13 @@ a:visited {color: #888;}
 			if i == 0 {
 				fmt.Fprintf(f, "<h4>%s</h4>\n", p.Timestamp.Format(dateFormat))
 			}
-			fmt.Fprintf(f, "<div><a href=\"%s\">%s</a> (%s)</div>", p.Link, p.Title, p.shortFeedLink())
+			fmt.Fprintf(f, "<div><a href=\"%s\">%s</a> (%s)</div>\n", p.Link, p.Title, p.shortFeedLink())
 		}
 	}
 
 	fmt.Fprintf(f, `</body>
-</html>`)
-
-	_ = browser.OpenFile(f.Name())
+</html>
+`)
 }
 
 type Post struct {
