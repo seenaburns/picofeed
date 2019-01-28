@@ -213,7 +213,7 @@ func fetchAll(ctx context.Context, feeds []*url.URL) []*Post {
 
 			feedData, err := fetchFeed(ctxTimeout, feed, 0)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+				fmt.Fprintf(os.Stderr, "ERROR: failed fetching feed %q: %v\n", feed, err)
 				return
 			}
 
@@ -253,7 +253,7 @@ func fetchFeed(ctx context.Context, feedUrl *url.URL, depth int) (*gofeed.Feed, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("%d: %s", resp.StatusCode, resp.Status)
+		return nil, fmt.Errorf("Unexpected status code: %s", resp.Status)
 	}
 
 	contents, err := ioutil.ReadAll(resp.Body)
