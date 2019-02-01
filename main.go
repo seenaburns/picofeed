@@ -113,6 +113,7 @@ func render(posts []*Post, dateFormat string) {
 func renderHtml(f io.Writer, posts []*Post, dateFormat string) {
 	fmt.Fprintf(f, `<!DOCTYPE html>
 <head>
+<title>Picofeed</title>
 <style>
 body {
 	margin: 0 auto;
