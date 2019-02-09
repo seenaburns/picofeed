@@ -24,8 +24,9 @@ const VERSION = "1.1"
 const FETCH_TIMEOUT = 10 * time.Second
 
 var (
-	html = flag.Bool("html", false, "Render feed as html to stdout")
-	web  = flag.Bool("web", false, "Display feed in browser")
+	html     = flag.Bool("html", false, "Render feed as html to stdout")
+	web      = flag.Bool("web", false, "Display feed in browser")
+	validate = flag.Bool("validate", false, "Exit with 1 if any feed is not parseable")
 )
 
 func init() {
@@ -215,12 +216,18 @@ func fetchAll(ctx context.Context, feeds []*url.URL) []*Post {
 			feedData, err := fetchFeed(ctxTimeout, feed, 0)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "ERROR: failed fetching feed %q: %v\n", feed, err)
+				if *validate {
+					os.Exit(1)
+				}
 				return
 			}
 
 			posts, err := parseFeed(feed, feedData)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "ERROR: failed reading feed data %q: %v\n", feed, err)
+				if *validate {
+					os.Exit(1)
+				}
 			}
 
 			for _, p := range posts {
